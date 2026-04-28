@@ -1,0 +1,28 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: tower-postgres
+    environment:
+      POSTGRES_DB: tower
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  app:
+    build: ./game
+    container_name: tower-app
+    depends_on:
+      - postgres
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/tower
+      SPRING_DATASOURCE_USERNAME: postgres
+      SPRING_DATASOURCE_PASSWORD: postgres
+      JWT_SECRET: your-256-bit-secret-key-for-jwt-signing-minimum-32-chars
+    ports:
+      - "8080:8080"
+
+volumes:
+  postgres_data:

@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8" />
+    <title>Fog Demo</title>
+    <style>
+        body { margin: 0; font-family: sans-serif; }
+        #login { padding: 20px; }
+        #game { display: none; }
+        canvas { background: black; display: block; }
+    </style>
+</head>
+<body>
+
+<div id="login">
+    <h2>Login / Register</h2>
+    <input id="email" placeholder="email"><br><br>
+    <input id="password" type="password" placeholder="password"><br><br>
+
+    <button onclick="register()">Register</button>
+    <button onclick="login()">Login</button>
+    <button onclick="guest()">Guest</button>
+</div>
+
+<div id="game">
+    <canvas id="canvas" width="800" height="600"></canvas>
+</div>
+
+<script>
+    const API = "http://localhost:8080"; // поменяй если нужно
+
+    let token = localStorage.getItem("token");
+    let floorId;
+    let playerX = 0;
+    let playerY = 0;
+
+    const CELL_SIZE = 10;
+    const CHUNK_SIZE = 16;
+    const VIEW_W = 20;
+    const VIEW_H = 12;
+
+    const canvas = document.getElementById("canvas");
+    const ctx = canvas.getContext("2d");
+
+    let fog = new Map();
+
+    // ================= AUTH =================
+
+    async function register() {
+        await fetch(API + "/auth/register", {
+            method: "POST",
+            headers: {"Content-Type":"application/json"},
+            body: JSON.stringify({
+                email: email.value,
+                username: email.value,
+                password: password.value
+            })
+        });
+        login();
+    }
+
+    async function login() {
+        const res = await fetch(API + "/auth/login", {
+            method: "POST",
+            headers: {"Content-Type":"application/json"},
+            body: JSON.stringify({
+                email: email.value,
+                password: password.value
+            })
+        });
+        const data = await res.json();
+        token = data.token;
+        localStorage.setItem("token", token);
+        startGame();
+    }
+
+    async function guest() {
+        const res = await fetch(API + "/auth/guest", {
+            method: "POST",
+            headers: {"Content-Type":"application/json"},
+            body: JSON.stringify({
+                deviceGuestId: "demo-device"
+            })
+        });
+        const data = await res.json();
+        token = data.token;
+        localStorage.setItem("token", token);
+        startGame();
+    }
+
+    // ================= INIT =================
+
+    async function startGame() {
+        document.getElementById("login").style.display = "none";
+        document.getElementById("game").style.display = "block";
+
+        await ensurePlaythrough();
+        await loadFloor();
+        await loadFog();
+
+        draw();
+    }
+
+    // ================= API =================
+
+    async function api(url, method="GET", body=null) {
+        return fetch(API + url, {
+            method,
+            headers: {
+                "Authorization": "Bearer " + token,
+                "Content-Type": "application/json"
+            },
+            body: body ? JSON.stringify(body) : null
+        });
+    }
+
+    async function ensurePlaythrough() {
+        let res = await api("/playthrough/active");
+        if (res.status === 404) {
+            await api("/playthrough", "POST");
+        }
+    }
+
+    async function loadFloor() {
+        const res = await api("/playthrough/active/floor");
+        const data = await res.json();
+
+        floorId = data.floorId;
+        playerX = Math.floor(data.playerX);
+        playerY = Math.floor(data.playerY);
+    }
+
+    async function loadFog() {
+        const res = await api(`/floors/${floorId}/fog`);
+        const data = await res.json();
+
+        fog.clear();
+
+        data.forEach(c => {
+            fog.set(key(c.chunkX, c.chunkY), {
+                x: c.chunkX,
+                y: c.chunkY,
+                mask: fromBase64(c.mask)
+            });
+        });
+    }
+
+    // ================= FOG =================
+
+    function key(x,y){ return x + "," + y; }
+
+    function getChunk(cx, cy) {
+        let k = key(cx,cy);
+        if (!fog.has(k)) {
+            fog.set(k, {
+                x: cx,
+                y: cy,
+                mask: new Uint8Array(32)
+            });
+        }
+        return fog.get(k);
+    }
+
+    function setVisible(mask, x, y) {
+        let i = y * 16 + x;
+        mask[i >> 3] |= (1 << (i % 8));
+    }
+
+    function isVisible(mask, x, y) {
+        let i = y * 16 + x;
+        return (mask[i >> 3] & (1 << (i % 8))) !== 0;
+    }
+
+    // ================= UPDATE =================
+
+    async function onMove() {
+        updateFog();
+        savePosition();
+        draw();
+    }
+
+    function updateFog() {
+        let minX = playerX - VIEW_W/2;
+        let maxX = playerX + VIEW_W/2;
+        let minY = playerY - VIEW_H/2;
+        let maxY = playerY + VIEW_H/2;
+
+        let changed = [];
+
+        for (let cx = Math.floor(minX/16); cx <= Math.floor(maxX/16); cx++) {
+            for (let cy = Math.floor(minY/16); cy <= Math.floor(maxY/16); cy++) {
+
+                let chunk = getChunk(cx,cy);
+                let dirty = false;
+
+                for (let x=0;x<16;x++){
+                    for (let y=0;y<16;y++){
+
+                        let wx = cx*16 + x;
+                        let wy = cy*16 + y;
+
+                        if (wx>=minX && wx<=maxX && wy>=minY && wy<=maxY){
+                            if (!isVisible(chunk.mask,x,y)){
+                                setVisible(chunk.mask,x,y);
+                                dirty = true;
+                            }
+                        }
+                    }
+                }
+
+                if (dirty) changed.push(chunk);
+            }
+        }
+
+        if (changed.length) sendFog(changed);
+    }
+
+    async function sendFog(chunks) {
+        await api(`/floors/${floorId}/fog`, "POST", {
+            chunks: chunks.map(c => ({
+                chunkX: c.x,
+                chunkY: c.y,
+                mask: toBase64(c.mask)
+            }))
+        });
+    }
+
+    async function savePosition() {
+        await api("/playthrough/position", "PUT", {
+            floorId,
+            playerX,
+            playerY
+        });
+    }
+
+    // ================= DRAW =================
+
+    function draw() {
+        ctx.fillStyle = "black";
+        ctx.fillRect(0,0,canvas.width,canvas.height);
+
+        for (let chunk of fog.values()) {
+            drawChunk(chunk);
+        }
+
+        ctx.fillStyle = "red";
+        ctx.fillRect(playerX*CELL_SIZE, playerY*CELL_SIZE, CELL_SIZE, CELL_SIZE);
+    }
+
+    function drawChunk(chunk) {
+        for (let y=0;y<16;y++){
+            for (let x=0;x<16;x++){
+                if (isVisible(chunk.mask,x,y)){
+                    let wx = chunk.x*16 + x;
+                    let wy = chunk.y*16 + y;
+
+                    ctx.fillStyle = "#aaa";
+                    ctx.fillRect(wx*CELL_SIZE, wy*CELL_SIZE, CELL_SIZE, CELL_SIZE);
+                }
+            }
+        }
+    }
+
+    // ================= INPUT =================
+
+    window.addEventListener("keydown", e => {
+        if (e.key==="w") playerY--;
+        if (e.key==="s") playerY++;
+        if (e.key==="a") playerX--;
+        if (e.key==="d") playerX++;
+
+        onMove();
+    });
+
+    // ================= BASE64 =================
+
+    function toBase64(arr) {
+        return btoa(String.fromCharCode(...arr));
+    }
+
+    function fromBase64(str) {
+        let bin = atob(str);
+        let arr = new Uint8Array(bin.length);
+        for (let i=0;i<bin.length;i++) arr[i] = bin.charCodeAt(i);
+        return arr;
+    }
+
+    // ================= AUTO LOGIN =================
+
+    if (token) startGame();
+
+</script>
+</body>
+</html>
