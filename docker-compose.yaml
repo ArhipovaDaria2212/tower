@@ -1,0 +1,32 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: tower-postgres
+    environment:
+      POSTGRES_DB: tower
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  app:
+    build: ./game
+    container_name: tower-app
+    depends_on:
+      - postgres
+    environment:
+      DB_URL: jdbc:postgresql://postgres:5432/tower
+      DB_USERNAME: postgres
+      DB_PASSWORD: postgres
+      JWT_SECRET: 256-bit-secret-key-for-jwt-signing-minimum-32-chars
+      JWT_EXPIRATION_MS: 86400000
+      SERVER_PORT: 8080
+      CORS_ALLOWED_ORIGINS: http://localhost:3000,http://127.0.0.1:3000,http://localhost:63342
+      LOGGING_LEVEL: INFO
+    ports:
+      - "8080:8080"
+
+volumes:
+  postgres_data:

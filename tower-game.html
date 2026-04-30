@@ -1,0 +1,698 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TOWER — Fog of War</title>
+  <link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Orbitron:wght@400;700;900&display=swap" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/sockjs-client@1/dist/sockjs.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@stomp/stompjs@7/bundles/stomp.umd.min.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --accent:  #00ffe7;
+      --accent2: #ff3c6f;
+      --border:  rgba(0,255,231,0.25);
+      --mono:    'Share Tech Mono', monospace;
+      --display: 'Orbitron', sans-serif;
+    }
+    html, body { width:100%; height:100%; background:#000; color:#fff; font-family:var(--mono); overflow:hidden; }
+
+    /* AUTH */
+    #auth-screen {
+      position:fixed; inset:0; display:flex; align-items:center; justify-content:center;
+      background:#000; z-index:100; transition:opacity .6s ease;
+    }
+    #auth-screen.hidden { opacity:0; pointer-events:none; }
+    .auth-bg {
+      position:absolute; inset:0;
+      background:
+              repeating-linear-gradient(0deg,transparent,transparent 39px,rgba(0,255,231,.04) 40px),
+              repeating-linear-gradient(90deg,transparent,transparent 39px,rgba(0,255,231,.04) 40px);
+      animation:gridShift 20s linear infinite;
+    }
+    @keyframes gridShift { to { background-position:0 40px,40px 0; } }
+    .auth-panel {
+      position:relative; width:380px;
+      border:1px solid var(--border); background:rgba(0,0,0,.92);
+      padding:40px 36px 36px;
+      clip-path:polygon(0 0,calc(100% - 20px) 0,100% 20px,100% 100%,0 100%);
+    }
+    .auth-panel::before {
+      content:''; position:absolute; top:0; left:0; right:0; height:2px;
+      background:linear-gradient(90deg,var(--accent),transparent);
+    }
+    .auth-title { font-family:var(--display); font-size:28px; font-weight:900; letter-spacing:.2em; color:var(--accent); text-shadow:0 0 20px rgba(0,255,231,.5); margin-bottom:6px; }
+    .auth-sub   { font-size:11px; color:rgba(255,255,255,.3); letter-spacing:.15em; margin-bottom:32px; }
+    .field { margin-bottom:16px; }
+    .field label { display:block; font-size:10px; letter-spacing:.2em; color:rgba(0,255,231,.6); margin-bottom:6px; text-transform:uppercase; }
+    .field input {
+      width:100%; background:rgba(0,255,231,.04); border:1px solid rgba(0,255,231,.2);
+      color:#fff; font-family:var(--mono); font-size:14px; padding:10px 14px; outline:none;
+      transition:border-color .2s,box-shadow .2s;
+    }
+    .field input:focus { border-color:var(--accent); box-shadow:0 0 12px rgba(0,255,231,.15); }
+    .btn-auth {
+      width:100%; margin-top:8px; padding:13px; background:transparent;
+      border:1px solid var(--accent); color:var(--accent);
+      font-family:var(--display); font-size:12px; font-weight:700; letter-spacing:.25em;
+      cursor:pointer; text-transform:uppercase; transition:color .2s,background .2s;
+    }
+    .btn-auth:hover  { background:var(--accent); color:#000; }
+    .btn-auth:disabled { opacity:.4; cursor:default; }
+    .auth-err   { margin-top:14px; font-size:11px; color:var(--accent2); min-height:16px; }
+    .auth-toggle { margin-top:20px; text-align:center; font-size:11px; color:rgba(255,255,255,.3); }
+    .auth-toggle a { color:var(--accent); cursor:pointer; }
+
+    /* GAME */
+    #game-screen { position:fixed; inset:0; display:none; }
+    #game-screen.visible { display:block; }
+    #game-canvas { display:block; width:100%; height:100%; cursor:crosshair; }
+
+    /* HUD */
+    #hud {
+      position:fixed; top:0; left:0; right:0;
+      display:flex; align-items:center; justify-content:space-between;
+      padding:12px 20px;
+      background:linear-gradient(180deg,rgba(0,0,0,.85) 0%,transparent 100%);
+      pointer-events:none; z-index:10;
+    }
+    .hud-title { font-family:var(--display); font-size:14px; font-weight:900; letter-spacing:.3em; color:var(--accent); text-shadow:0 0 10px rgba(0,255,231,.4); }
+    .hud-info  { font-size:11px; color:rgba(255,255,255,.4); letter-spacing:.1em; text-align:right; line-height:1.7; }
+    .hud-info span { color:rgba(0,255,231,.7); }
+
+    #controls-hint {
+      position:fixed; bottom:20px; right:20px;
+      font-size:10px; color:rgba(255,255,255,.2); letter-spacing:.1em; line-height:1.9;
+      pointer-events:none; z-index:10; text-align:right;
+    }
+    #status-dot {
+      position:fixed; bottom:20px; left:20px;
+      display:flex; align-items:center; gap:8px;
+      font-size:10px; color:rgba(255,255,255,.3); letter-spacing:.1em; z-index:10;
+    }
+    .dot { width:6px; height:6px; border-radius:50%; background:var(--accent); box-shadow:0 0 6px var(--accent); animation:pulse 2s ease-in-out infinite; }
+    .dot.err { background:var(--accent2); box-shadow:0 0 6px var(--accent2); animation:none; }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.3} }
+
+    #floor-badge {
+      position:fixed; top:50px; left:50%; transform:translateX(-50%);
+      font-family:var(--display); font-size:11px; letter-spacing:.3em;
+      color:rgba(0,255,231,.5); pointer-events:none; z-index:10;
+      opacity:0; transition:opacity .5s;
+    }
+    #floor-badge.show { opacity:1; }
+  </style>
+</head>
+<body>
+
+<!-- AUTH -->
+<div id="auth-screen">
+  <div class="auth-bg"></div>
+  <div class="auth-panel">
+    <div class="auth-title">TOWER</div>
+    <div class="auth-sub">ROGUELIKE · FOG OF WAR · ASCEND</div>
+    <div class="field">
+      <label>Email</label>
+      <input type="email" id="inp-email" placeholder="operator@tower.io" autocomplete="email">
+    </div>
+    <div class="field" id="field-uname" style="display:none">
+      <label>Username</label>
+      <input type="text" id="inp-uname" placeholder="callsign" autocomplete="username">
+    </div>
+    <div class="field">
+      <label>Password</label>
+      <input type="password" id="inp-pass" placeholder="••••••••" autocomplete="current-password">
+    </div>
+    <button class="btn-auth" id="btn-auth">ENTER THE TOWER</button>
+    <div class="auth-err" id="auth-err"></div>
+    <div class="auth-toggle">
+      <span id="tog-txt">No account?</span>
+      <a id="tog-link"> Register instead</a>
+    </div>
+  </div>
+</div>
+
+<!-- GAME -->
+<div id="game-screen">
+  <canvas id="game-canvas"></canvas>
+  <div id="hud">
+    <div class="hud-title">TOWER</div>
+    <div class="hud-info">FLOOR <span id="hud-floor">—</span><br>WORLD <span id="hud-pos">—</span></div>
+  </div>
+  <div id="floor-badge">FLOOR <span id="badge-n">1</span></div>
+  <div id="status-dot"><div class="dot" id="dot"></div><span id="status-txt">CONNECTING...</span></div>
+  <div id="controls-hint">↑ ↓ ← → MOVE<br>SHIFT+↑ NEXT FLOOR</div>
+</div>
+
+<script>
+  // ═══════════════════════════════════════════════════════════
+  // CONFIG
+  // ═══════════════════════════════════════════════════════════
+  const API        = 'http://localhost:8080';
+  const WS_URL     = 'http://localhost:8080/ws';
+
+  // World / chunk dimensions
+  const CHUNK_BITS = 16;          // chunk = 16×16 world cells
+  const CELL_WU    = 1;           // 1 world unit per cell (matches backend)
+
+  // Rendering
+  // Each world unit is rendered as WORLD_SCALE canvas pixels.
+  // With large chunk coords (e.g. chunkX=31) the total world width = 31*16 = 496 wu.
+  // WORLD_SCALE=2 → 992 canvas px wide — fits on screen + leaves room for camera pan.
+  const WORLD_SCALE = 2;          // canvas pixels per world unit
+  const CHUNK_PX    = CHUNK_BITS * WORLD_SCALE;  // 32 canvas px per chunk
+
+  // Trail colour — clearly visible on black
+  const TRAIL_COLOR = '#2a3a5e';  // dark indigo-blue
+
+  // Player
+  const PLAYER_WU  = 3;           // player radius in world units
+  const PLAYER_PX  = PLAYER_WU * WORLD_SCALE;
+  const LIGHT_PX   = 80;          // light cone radius in canvas px
+
+  // Movement
+  const MOVE_WU    = 2;           // world units per keypress
+
+  // API fog reveal radius
+  const REVEAL_R   = 5.0;
+
+  // ═══════════════════════════════════════════════════════════
+  // STATE
+  // ═══════════════════════════════════════════════════════════
+  let token        = localStorage.getItem('tower_token') || null;
+  let playthrough  = null;
+  let currentFloor = null;
+
+  // Player position in WORLD coordinates (Y grows upward, as backend expects)
+  let worldX = 8;    // start near origin
+  let worldY = 8;
+
+  // Camera offset in world units (top-left corner of viewport)
+  let camX = 0, camY = 0;
+
+  // fogChunks: "cx,cy" → { chunkX, chunkY, maskBase64 }
+  // We treat the PRESENCE of a chunk (even with all-zero mask) as "visited".
+  let fogChunks    = new Map();
+  let stompClient  = null;
+  let isRegMode    = false;
+
+  let canvas, ctx;
+  let fogCanvas, fogCtx;  // offscreen: persistent trail layer
+
+  // ═══════════════════════════════════════════════════════════
+  // DOM
+  // ═══════════════════════════════════════════════════════════
+  const authScreen = document.getElementById('auth-screen');
+  const gameScreen = document.getElementById('game-screen');
+  const btnAuth    = document.getElementById('btn-auth');
+  const authErr    = document.getElementById('auth-err');
+  const inpEmail   = document.getElementById('inp-email');
+  const inpPass    = document.getElementById('inp-pass');
+  const inpUname   = document.getElementById('inp-uname');
+  const fieldUname = document.getElementById('field-uname');
+  const togLink    = document.getElementById('tog-link');
+  const togTxt     = document.getElementById('tog-txt');
+  const hudFloor   = document.getElementById('hud-floor');
+  const hudPos     = document.getElementById('hud-pos');
+  const badgeN     = document.getElementById('badge-n');
+  const floorBadge = document.getElementById('floor-badge');
+  const dot        = document.getElementById('dot');
+  const statusTxt  = document.getElementById('status-txt');
+
+  // ═══════════════════════════════════════════════════════════
+  // AUTH UI
+  // ═══════════════════════════════════════════════════════════
+  togLink.addEventListener('click', () => {
+    isRegMode = !isRegMode;
+    fieldUname.style.display = isRegMode ? 'block' : 'none';
+    btnAuth.textContent      = isRegMode ? 'CREATE ACCOUNT' : 'ENTER THE TOWER';
+    togTxt.textContent       = isRegMode ? 'Have an account?' : 'No account?';
+    togLink.textContent      = isRegMode ? ' Login instead' : ' Register instead';
+    authErr.textContent = '';
+  });
+
+  btnAuth.addEventListener('click', handleAuth);
+  [inpEmail, inpPass, inpUname].forEach(el =>
+          el.addEventListener('keydown', e => { if (e.key === 'Enter') handleAuth(); })
+  );
+
+  async function handleAuth() {
+    authErr.textContent = '';
+    btnAuth.disabled    = true;
+    btnAuth.textContent = '···';
+    try {
+      const path = isRegMode ? '/auth/register' : '/auth/login';
+      const body = isRegMode
+              ? { email: inpEmail.value.trim(), username: inpUname.value.trim(), password: inpPass.value }
+              : { email: inpEmail.value.trim(), password: inpPass.value };
+      const r = await apiFetch('POST', path, body, false);
+      token = r.token;
+      localStorage.setItem('tower_token', token);
+      await startGame();
+    } catch(e) {
+      authErr.textContent = e.message || 'Authentication failed';
+      btnAuth.disabled    = false;
+      btnAuth.textContent = isRegMode ? 'CREATE ACCOUNT' : 'ENTER THE TOWER';
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════
+  // API
+  // ═══════════════════════════════════════════════════════════
+  async function apiFetch(method, path, body = null, auth = true) {
+    const headers = { 'Content-Type': 'application/json' };
+    if (auth && token) headers['Authorization'] = 'Bearer ' + token;
+    const res = await fetch(API + path, {
+      method, headers,
+      body: body ? JSON.stringify(body) : undefined
+    });
+    if (!res.ok) {
+      let msg = `Error ${res.status}`;
+      try { const j = await res.json(); msg = j.message || j.error || msg; } catch(_) {}
+      throw new Error(msg);
+    }
+    if (res.status === 204) return null;
+    return res.json();
+  }
+
+  // ═══════════════════════════════════════════════════════════
+  // GAME START
+  // ═══════════════════════════════════════════════════════════
+  async function startGame() {
+    authScreen.classList.add('hidden');
+    gameScreen.classList.add('visible');
+    initCanvas();
+
+    try { playthrough = await apiFetch('GET', '/playthrough/active'); }
+    catch(_) { playthrough = await apiFetch('POST', '/playthrough'); }
+
+    // Restore world position
+    if (playthrough.playerX != null) worldX = playthrough.playerX;
+    if (playthrough.playerY != null) worldY = playthrough.playerY;
+
+    currentFloor = await apiFetch('GET', '/playthrough/active/floor');
+    updateHUD();
+    centerCamera();
+
+    await loadFog();   // ← paint all previously visited chunks
+    connectWS();
+    draw();
+  }
+
+  // ═══════════════════════════════════════════════════════════
+  // CANVAS + CAMERA
+  // ═══════════════════════════════════════════════════════════
+  function initCanvas() {
+    canvas    = document.getElementById('game-canvas');
+    ctx       = canvas.getContext('2d');
+    fogCanvas = document.createElement('canvas');
+    fogCtx    = fogCanvas.getContext('2d');
+    resizeCanvas();
+    window.addEventListener('resize', () => { resizeCanvas(); redrawFogLayer(); draw(); });
+  }
+
+  function resizeCanvas() {
+    canvas.width = fogCanvas.width  = window.innerWidth;
+    canvas.height= fogCanvas.height = window.innerHeight;
+  }
+
+  // Keep player roughly centred, but let camera follow smoothly
+  function centerCamera() {
+    // Camera (camX,camY) = world coords of the top-left of the viewport
+    // Player canvas position should be near centre
+    camX = worldX - (canvas.width  / 2) / WORLD_SCALE;
+    camY = worldY + (canvas.height / 2) / WORLD_SCALE;  // Y flipped
+  }
+
+  // World → Canvas
+  function w2cx(wx) { return (wx - camX) * WORLD_SCALE; }
+  function w2cy(wy) { return (camY - wy) * WORLD_SCALE; }  // flip Y
+
+  // ═══════════════════════════════════════════════════════════
+  // FOG — KEY INSIGHT:
+  //   The backend returns List<FogChunkDto> where even all-zero masks
+  //   (maskBase64 = "AAAA...") represent chunks the player has visited.
+  //   The PRESENCE of a chunk in the list = that area was explored.
+  //   We draw every chunk's footprint regardless of individual bit values.
+  //   If maskBase64 has non-zero bits, we also render finer detail.
+  // ═══════════════════════════════════════════════════════════
+  async function loadFog() {
+    if (!currentFloor) return;
+    try {
+      const chunks = await apiFetch('GET', `/floors/${currentFloor.id}/fog`);
+      fogChunks.clear();
+      fogCtx.clearRect(0, 0, fogCanvas.width, fogCanvas.height);
+      chunks.forEach(c => {
+        fogChunks.set(ck(c), c);
+      });
+      redrawFogLayer();
+    } catch(e) {
+      console.warn('loadFog:', e);
+    }
+  }
+
+  function ck(c) { return `${c.chunkX},${c.chunkY}`; }
+
+  function decodeMask(b64) {
+    const bin = atob(b64);
+    const u8  = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
+    return u8;
+  }
+
+  /**
+   * Check whether ALL cells in the mask are hidden (all bits = 1).
+   * Backend semantics: 1 = hidden (fog), 0 = revealed (explored).
+   * initializeFog fills with 0xFF (all hidden).
+   * revealArea clears bits to 0 (revealed).
+   */
+  function isMaskAllHidden(b64) {
+    if (!b64) return true;
+    const u8 = decodeMask(b64);
+    return u8.every(v => v === 0xFF);
+  }
+
+  /**
+   * Read one cell's revealed state from a mask.
+   *
+   * Backend bit layout (from revealCellsInChunk):
+   *   bitIndex  = localY * CELLS_PER_CHUNK + localX   (row-major, localY=0 is BOTTOM of chunk)
+   *   byteIndex = bitIndex / 8
+   *   bitOffset = bitIndex % 8                         ← LSB-first (bit 0 = value & 1)
+   *   revealed  ⟺  bit == 1  (set via mask[b] |= (1 << bitOffset))
+   *
+   * Semantics: 0 = hidden (fog), 1 = revealed (explored)
+   */
+  function isCellRevealed(mask, localX, localY) {
+    const bitIndex  = localY * CHUNK_BITS + localX;
+    const byteIndex = Math.floor(bitIndex / 8);
+    const bitOffset = bitIndex % 8;           // LSB-first, matches Java's (1 << bitOffset)
+    return ((mask[byteIndex] >> bitOffset) & 1) === 1;  // 1 = revealed
+  }
+
+  /**
+   * Paint one FogChunkDto onto fogCanvas.
+   *
+   * Coordinate system:
+   *   World X → Canvas X  (same direction)
+   *   World Y → Canvas Y  (flipped: world Y=0 at bottom, canvas Y=0 at top)
+   *
+   *   chunk top-left in canvas:
+   *     cx0 = (chunkX * CHUNK_BITS - camX) * WORLD_SCALE
+   *     cy0 = (camY  - (chunkY+1) * CHUNK_BITS) * WORLD_SCALE
+   *           ↑ +1 because world Y of chunk top = (chunkY+1)*CHUNK_BITS
+   *
+   * Rendering strategy:
+   *   - If mask is all-0xFF (fully hidden / never touched): skip — chunk shouldn't exist but guard anyway.
+   *   - Otherwise: for each cell where bit==0 (revealed), paint a WORLD_SCALE×WORLD_SCALE rectangle.
+   *     Use ImageData for the whole chunk at once (fast, no per-cell fillRect calls).
+   *
+   * localY=0 in backend = BOTTOM of chunk in world space.
+   * In canvas space (Y flipped), localY=0 maps to the BOTTOM row of the chunk rect,
+   * i.e. canvas row = (CHUNK_BITS - 1 - localY) * WORLD_SCALE relative to cy0.
+   */
+  function paintChunkAt(chunk, camXSnapshot, camYSnapshot) {
+    // Chunk top-left corner in canvas coordinates
+    const cx0 = (chunk.chunkX * CHUNK_BITS - camXSnapshot) * WORLD_SCALE;
+    const cy0 = (camYSnapshot - (chunk.chunkY + 1) * CHUNK_BITS) * WORLD_SCALE;
+
+    // Cull: skip chunks entirely outside the viewport
+    if (cx0 >= canvas.width  || cy0 >= canvas.height) return;
+    if (cx0 + CHUNK_PX <= 0  || cy0 + CHUNK_PX <= 0)  return;
+
+    if (!chunk.maskBase64) return;
+    const mask = decodeMask(chunk.maskBase64);
+
+    // Build an ImageData for this chunk (CHUNK_PX × CHUNK_PX pixels)
+    // Parse trail colours once
+    const [tr, tg, tb] = hexToRgb(TRAIL_COLOR);
+    const [ir, ig, ib] = hexToRgb(TRAIL_COLOR);
+
+    const imgW = CHUNK_PX, imgH = CHUNK_PX;
+    const imgData = fogCtx.createImageData(imgW, imgH);
+    const px = imgData.data;  // Uint8ClampedArray, RGBA
+
+    let anyRevealed = false;
+
+    for (let localY = 0; localY < CHUNK_BITS; localY++) {
+      for (let localX = 0; localX < CHUNK_BITS; localX++) {
+        if (!isCellRevealed(mask, localX, localY)) continue;
+        anyRevealed = true;
+
+        // In canvas space, localY=0 (bottom of world chunk) → bottom row of chunk rect
+        const canvasRow = (CHUNK_BITS - 1 - localY);  // flip Y within chunk
+
+        // This cell occupies a WORLD_SCALE × WORLD_SCALE block in the ImageData
+        // Use brighter inner colour for cells near chunk centre
+        const edge = Math.min(localX, CHUNK_BITS-1-localX, localY, CHUNK_BITS-1-localY);
+        const bright = edge >= 3;
+        const r = bright ? ir : tr;
+        const g = bright ? ig : tg;
+        const b = bright ? ib : tb;
+
+        for (let py = 0; py < WORLD_SCALE; py++) {
+          for (let px2 = 0; px2 < WORLD_SCALE; px2++) {
+            const imgX = localX * WORLD_SCALE + px2;
+            const imgY = canvasRow * WORLD_SCALE + py;
+            const idx  = (imgY * imgW + imgX) * 4;
+            px[idx]     = r;
+            px[idx + 1] = g;
+            px[idx + 2] = b;
+            px[idx + 3] = 220;  // slight transparency so light cone shows through nicely
+          }
+        }
+      }
+    }
+
+    if (anyRevealed) {
+      fogCtx.putImageData(imgData, cx0, cy0);
+    }
+  }
+
+  function hexToRgb(hex) {
+    const n = parseInt(hex.replace('#',''), 16);
+    return [(n >> 16) & 0xFF, (n >> 8) & 0xFF, n & 0xFF];
+  }
+
+  /**
+   * Full repaint of fogCanvas — called on load, resize, camera jump.
+   * Paints all known chunks at current camera position.
+   */
+  function redrawFogLayer() {
+    if (!fogCtx) return;
+    fogCtx.clearRect(0, 0, fogCanvas.width, fogCanvas.height);
+    for (const chunk of fogChunks.values()) {
+      paintChunkAt(chunk, camX, camY);
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════
+  // WEBSOCKET — STOMP/SockJS
+  // ═══════════════════════════════════════════════════════════
+  function connectWS() {
+    if (!currentFloor) return;
+    if (stompClient) { try { stompClient.deactivate(); } catch(_) {} stompClient = null; }
+
+    stompClient = new StompJs.Client({
+      webSocketFactory: () => new SockJS(WS_URL),
+      connectHeaders: { Authorization: `Bearer ${token}` },
+      reconnectDelay: 3000,
+      onConnect: () => {
+        setStatus(true, 'CONNECTED');
+        stompClient.subscribe(`/topic/floors/${currentFloor.id}/fog`, (msg) => {
+          try {
+            const chunks = JSON.parse(msg.body);
+            if (!Array.isArray(chunks)) return;
+            chunks.forEach(c => {
+              fogChunks.set(ck(c), c);
+              paintChunkAt(c, camX, camY);
+            });
+            draw();
+          } catch(e) { console.warn('WS parse:', e); }
+        });
+        // Push an initial reveal so the area around the player's restored position
+        // is uncovered without requiring a keypress.
+        revealFogAt(worldX, worldY);
+      },
+      onDisconnect:     () => setStatus(false, 'RECONNECTING'),
+      onWebSocketError: () => setStatus(false, 'WS ERROR'),
+      onStompError:     () => setStatus(false, 'STOMP ERROR'),
+    });
+    stompClient.activate();
+  }
+
+  // ═══════════════════════════════════════════════════════════
+  // FOG REVEAL — published over STOMP, broadcast comes back on
+  // /topic/floors/{id}/fog (see connectWS subscription).
+  // No HTTP round-trip per move.
+  // ═══════════════════════════════════════════════════════════
+  function revealFogAt(wx, wy) {
+    if (!currentFloor) return;
+    if (!stompClient || !stompClient.connected) return;
+    stompClient.publish({
+      destination: `/app/floors/${currentFloor.id}/fog/reveal`,
+      body: JSON.stringify({ playerX: wx, playerY: wy, radius: REVEAL_R })
+    });
+  }
+
+  // ═══════════════════════════════════════════════════════════
+  // POSITION UPDATE — published over STOMP. Per-keypress, so HTTP
+  // would be too costly. Server validates the floorId belongs to
+  // the active playthrough; reveal is sent as a separate STOMP
+  // frame so the broadcast goes out independently.
+  // ═══════════════════════════════════════════════════════════
+  function updatePosition(wx, wy) {
+    if (!playthrough || !currentFloor) return;
+    if (!stompClient || !stompClient.connected) return;
+    stompClient.publish({
+      destination: '/app/playthrough/position',
+      body: JSON.stringify({ playerX: wx, playerY: wy, floorId: currentFloor.id })
+    });
+    revealFogAt(wx, wy);
+  }
+
+  // ═══════════════════════════════════════════════════════════
+  // INPUT
+  // ═══════════════════════════════════════════════════════════
+  document.addEventListener('keydown', async (e) => {
+    if (!gameScreen.classList.contains('visible')) return;
+
+    if (e.shiftKey && e.key === 'ArrowUp') { e.preventDefault(); await advanceFloor(); return; }
+
+    let moved = false;
+    if (e.key === 'ArrowLeft')  { worldX -= MOVE_WU; moved = true; e.preventDefault(); }
+    if (e.key === 'ArrowRight') { worldX += MOVE_WU; moved = true; e.preventDefault(); }
+    if (e.key === 'ArrowUp')    { worldY += MOVE_WU; moved = true; e.preventDefault(); }
+    if (e.key === 'ArrowDown')  { worldY -= MOVE_WU; moved = true; e.preventDefault(); }
+
+    if (moved) {
+
+      centerCamera();
+      redrawFogLayer();   // repaint fog at new camera position
+      draw();
+      updateHUD();
+      updatePosition(worldX, worldY);
+    }
+  });
+
+  // ═══════════════════════════════════════════════════════════
+  // ADVANCE FLOOR
+  // ═══════════════════════════════════════════════════════════
+  async function advanceFloor() {
+    try {
+      const res = await apiFetch('POST', '/playthrough/active/floor/advance');
+      if (!res.floor) {
+        // paywall hit
+        console.info('advanceFloor:', res.message);
+        return;
+      }
+      currentFloor = res.floor;
+      fogChunks.clear();
+      fogCtx.clearRect(0, 0, fogCanvas.width, fogCanvas.height);
+      updateHUD();
+      showFloorBadge(currentFloor.floorNumber);
+      // Reconnect & re-subscribe to the new floor's topic before pushing position.
+      connectWS();
+      // Wait for the STOMP CONNECT to complete before publishing.
+      const start = Date.now();
+      while ((!stompClient || !stompClient.connected) && Date.now() - start < 3000) {
+        await new Promise(r => setTimeout(r, 50));
+      }
+      updatePosition(worldX, worldY);
+    } catch(e) { console.warn('advanceFloor:', e); }
+  }
+
+  // ═══════════════════════════════════════════════════════════
+  // HUD
+  // ═══════════════════════════════════════════════════════════
+  function updateHUD() {
+    hudFloor.textContent = currentFloor ? currentFloor.floorNumber : '—';
+    hudPos.textContent   = `${Math.round(worldX)} · ${Math.round(worldY)}`;
+  }
+  function showFloorBadge(n) {
+    badgeN.textContent = n;
+    floorBadge.classList.add('show');
+    setTimeout(() => floorBadge.classList.remove('show'), 2200);
+  }
+  function setStatus(ok, msg) {
+    dot.className    = 'dot' + (ok ? '' : ' err');
+    statusTxt.textContent = msg;
+  }
+
+  // ═══════════════════════════════════════════════════════════
+  // DRAW — main render loop (called after every state change)
+  //
+  // Layer 1: solid black (unexplored world)
+  // Layer 2: fogCanvas stamped at (0,0) — contains the trail
+  // Layer 3: light cone at player (using 'lighter' blend)
+  // Layer 4: player circle
+  // ═══════════════════════════════════════════════════════════
+  function draw() {
+    if (!ctx) return;
+    const W = canvas.width, H = canvas.height;
+
+    // Player canvas position
+    const px = w2cx(worldX);
+    const py = w2cy(worldY);
+
+    // ── 1. Black background ──────────────────────────────
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, 0, W, H);
+
+    // ── 2. Trail (explored area) ─────────────────────────
+    ctx.drawImage(fogCanvas, 0, 0);
+
+    // ── 3. Light cone (additive blend so trail glows) ────
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    const grad = ctx.createRadialGradient(px, py, 0, px, py, LIGHT_PX);
+    grad.addColorStop(0,    'rgba(80,75,55,0.6)');
+    grad.addColorStop(0.4,  'rgba(50,45,35,0.3)');
+    grad.addColorStop(0.75, 'rgba(20,18,14,0.1)');
+    grad.addColorStop(1,    'rgba(0,0,0,0)');
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.arc(px, py, LIGHT_PX, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+
+    // ── 4. Player ────────────────────────────────────────
+    // Halo
+    const halo = ctx.createRadialGradient(px, py, 0, px, py, 24);
+    halo.addColorStop(0,   'rgba(0,255,231,0.25)');
+    halo.addColorStop(0.5, 'rgba(0,255,231,0.08)');
+    halo.addColorStop(1,   'rgba(0,0,0,0)');
+    ctx.fillStyle = halo;
+    ctx.beginPath();
+    ctx.arc(px, py, 24, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Body
+    ctx.beginPath();
+    ctx.arc(px, py, PLAYER_PX, 0, Math.PI * 2);
+    ctx.fillStyle   = '#ffffff';
+    ctx.shadowColor = '#00ffe7';
+    ctx.shadowBlur  = 16;
+    ctx.fill();
+    ctx.shadowBlur = 0;
+
+    // Centre dot
+    ctx.beginPath();
+    ctx.arc(px, py, 2.5, 0, Math.PI * 2);
+    ctx.fillStyle = '#00ffe7';
+    ctx.fill();
+  }
+
+  // ═══════════════════════════════════════════════════════════
+  // INIT
+  // ═══════════════════════════════════════════════════════════
+  window.addEventListener('load', async () => {
+    if (token) {
+      try { await startGame(); }
+      catch(e) { console.warn('Resume failed:', e); token = null; localStorage.removeItem('tower_token'); }
+    }
+  });
+</script>
+</body>
+</html>

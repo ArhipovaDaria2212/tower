@@ -1,0 +1,48 @@
+spring:
+  application:
+    name: tower
+  profiles:
+    active: ${SPRING_PROFILES_ACTIVE:dev}
+  datasource:
+    url: ${DB_URL}
+    username: ${DB_USERNAME}
+    password: ${DB_PASSWORD}
+    driver-class-name: org.postgresql.Driver
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    show-sql: false
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+        format_sql: true
+  flyway:
+    enabled: true
+    baseline-on-migrate: true
+    locations: classpath:db/migration
+
+# JWT configuration
+# All values must be supplied via environment (see .run/TowerApplication.run.xml)
+jwt:
+  secret: ${JWT_SECRET}
+  expiration: ${JWT_EXPIRATION_MS}
+
+# Server configuration
+server:
+  port: ${SERVER_PORT}
+
+# CORS configuration (comma-separated list of allowed origins)
+cors:
+  allowed-origins: ${CORS_ALLOWED_ORIGINS}
+
+# OpenAPI/Swagger
+springdoc:
+  api-docs:
+    path: /api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+
+logging:
+  level:
+    root: ${LOGGING_LEVEL}
+    org.springframework.security: ${LOGGING_LEVEL}
