@@ -10,9 +10,17 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
+/**
+ * Creates, signs, and validates JWT access tokens for registered users.
+ *
+ * <p>The system has no guest mode — every token is bound to a user UUID via the {@code userId} claim.
+ * Token subject is always {@code "USER"} (kept for forward compatibility with role-based scopes).
+ */
 @Component
 @Slf4j
 public class JwtTokenProvider {
+
+    public static final String SUBJECT_USER = "USER";
 
     private final SecretKey key;
     private final long expiration;
@@ -23,15 +31,15 @@ public class JwtTokenProvider {
     }
 
     /**
-     * Generates a signed JWT token for a regular user.
+     * Generates a signed JWT token for a registered user.
      */
-    public String generateToken(UUID userId, String subject) {
+    public String generateToken(UUID userId) {
         Date now = new Date();
         Date expiryDate = new Date(now.getTime() + expiration);
 
         return Jwts.builder()
-                .subject(subject)
-                .claim("userId", userId)
+                .subject(SUBJECT_USER)
+                .claim("userId", userId.toString())
                 .issuedAt(now)
                 .expiration(expiryDate)
                 .signWith(key)
@@ -39,46 +47,21 @@ public class JwtTokenProvider {
     }
 
     /**
-     * Generates a signed JWT token for a guest player.
-     */
-    public String generateGuestToken(UUID guestId) {
-        Date now = new Date();
-        Date expiryDate = new Date(now.getTime() + expiration);
-
-        return Jwts.builder()
-                .subject("GUEST")
-                .claim("guestId", guestId)
-                .issuedAt(now)
-                .expiration(expiryDate)
-                .signWith(key)
-                .compact();
-    }
-
-    /**
-     * Extracts a user identifier from a user token.
+     * Extracts the user identifier from a token. Returns {@code null} if the claim is missing or
+     * malformed, so the caller can treat it as "no auth" instead of bombing with a 500.
      */
     public UUID getUserIdFromToken(String token) {
-        Claims claims =
-                Jwts.parser().verifyWith(key).build().parseSignedClaims(token).getPayload();
-        return UUID.fromString(claims.get("userId", String.class));
-    }
-
-    /**
-     * Extracts a guest identifier from a guest token.
-     */
-    public UUID getGuestIdFromToken(String token) {
-        Claims claims =
-                Jwts.parser().verifyWith(key).build().parseSignedClaims(token).getPayload();
-        return UUID.fromString(claims.get("guestId", String.class));
-    }
-
-    /**
-     * Extracts token subject.
-     */
-    public String getSubjectFromToken(String token) {
-        Claims claims =
-                Jwts.parser().verifyWith(key).build().parseSignedClaims(token).getPayload();
-        return claims.getSubject();
+        Claims claims = parse(token);
+        String userIdRaw = claims.get("userId", String.class);
+        if (userIdRaw == null) {
+            return null;
+        }
+        try {
+            return UUID.fromString(userIdRaw);
+        } catch (IllegalArgumentException ex) {
+            log.debug("JWT userId claim is not a valid UUID: {}", userIdRaw);
+            return null;
+        }
     }
 
     /**
@@ -86,11 +69,15 @@ public class JwtTokenProvider {
      */
     public boolean validateToken(String token) {
         try {
-            Jwts.parser().verifyWith(key).build().parseSignedClaims(token);
+            parse(token);
             return true;
         } catch (JwtException | IllegalArgumentException e) {
             log.debug("JWT validation failed: {}", e.getMessage());
             return false;
         }
+    }
+
+    private Claims parse(String token) {
+        return Jwts.parser().verifyWith(key).build().parseSignedClaims(token).getPayload();
     }
 }

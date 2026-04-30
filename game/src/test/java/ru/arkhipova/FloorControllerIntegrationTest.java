@@ -29,9 +29,6 @@ class FloorControllerIntegrationTest {
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     @Autowired
-    private DiscoveredIconRepository discoveredIconRepository;
-
-    @Autowired
     private FogChunkRepository fogChunkRepository;
 
     @Autowired
@@ -51,7 +48,6 @@ class FloorControllerIntegrationTest {
 
     @BeforeEach
     void cleanup() {
-        discoveredIconRepository.deleteAll();
         fogChunkRepository.deleteAll();
         floorRepository.deleteAll();
         playthroughRepository.deleteAll();

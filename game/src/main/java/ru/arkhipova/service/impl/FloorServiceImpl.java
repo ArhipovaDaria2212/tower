@@ -1,8 +1,8 @@
 package ru.arkhipova.service.impl;
 
 import jakarta.persistence.EntityNotFoundException;
-import java.util.Random;
 import java.util.UUID;
+import java.util.concurrent.ThreadLocalRandom;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -29,7 +29,6 @@ public class FloorServiceImpl implements FloorService {
     private final FogService fogService;
 
     private static final int DEFAULT_GENERATOR_VERSION = 1;
-    private static final Random RANDOM = new Random();
 
     /**
      * Creates a floor for a playthrough and initializes fog data.
@@ -62,6 +61,7 @@ public class FloorServiceImpl implements FloorService {
      * Returns the current floor for the active playthrough.
      */
     @Override
+    @Transactional(readOnly = true)
     public FloorResponse getCurrentFloor(UUID playerId) {
         Playthrough playthrough = playthroughRepository
                 .findByUserIdAndStatus(playerId, Playthrough.PlaythroughStatus.ACTIVE)
@@ -86,14 +86,15 @@ public class FloorServiceImpl implements FloorService {
                 .findByUserIdAndStatus(playerId, Playthrough.PlaythroughStatus.ACTIVE)
                 .orElseThrow(() -> new EntityNotFoundException("No active playthrough found"));
 
+        if (playthrough.getCurrentFloor() == null) {
+            throw new IllegalStateException("Active playthrough has no current floor");
+        }
         int currentFloorNumber = playthrough.getCurrentFloor().getFloorNumber();
         int nextFloorNumber = currentFloorNumber + 1;
 
         Entitlement entitlement = entitlementRepository.findByUserId(playerId).orElse(null);
 
-        boolean paywallEnabled = isPaywallEnabled(nextFloorNumber);
-
-        if (paywallEnabled) {
+        if (isPaywallEnabled(nextFloorNumber)) {
             int maxUnlocked = entitlement != null ? entitlement.getMaxUnlockedFloor() : 0;
             if (nextFloorNumber > maxUnlocked) {
                 log.warn(
@@ -113,10 +114,6 @@ public class FloorServiceImpl implements FloorService {
         playthrough.setCurrentFloor(nextFloor);
         playthroughRepository.save(playthrough);
 
-        if (entitlement != null) {
-            entitlement.setMaxUnlockedFloor(nextFloorNumber);
-            entitlementRepository.save(entitlement);
-        }
         log.info("Advanced floor: playerId={}, floorNumber={}", playerId, nextFloorNumber);
 
         return AdvanceFloorResponse.builder()
@@ -126,7 +123,7 @@ public class FloorServiceImpl implements FloorService {
     }
 
     private long generateSeed() {
-        return RANDOM.nextInt(1000000);
+        return ThreadLocalRandom.current().nextLong();
     }
 
     private boolean isPaywallEnabled(Integer floorNumber) {

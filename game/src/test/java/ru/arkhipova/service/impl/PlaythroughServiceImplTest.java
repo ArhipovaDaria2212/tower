@@ -10,6 +10,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import ru.arkhipova.exception.ForbiddenException;
 import ru.arkhipova.model.entity.Entitlement;
 import ru.arkhipova.model.entity.Floor;
 import ru.arkhipova.model.entity.Playthrough;
@@ -74,7 +75,7 @@ class PlaythroughServiceImplTest {
         when(playthroughRepository.findByUserIdAndStatus(playerId, Playthrough.PlaythroughStatus.ACTIVE))
                 .thenReturn(Optional.of(playthrough));
 
-        assertThrows(IllegalArgumentException.class, () -> playthroughService.updatePosition(playerId, request));
+        assertThrows(ForbiddenException.class, () -> playthroughService.updatePosition(playerId, request));
         verify(playthroughRepository, never()).save(any(Playthrough.class));
     }
 }

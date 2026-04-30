@@ -2,17 +2,22 @@ package ru.arkhipova.controller;
 
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
-import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
-import ru.arkhipova.model.request.PositionUpdateRequest;
 import ru.arkhipova.model.response.PlaythroughResponse;
 import ru.arkhipova.security.UserPrincipal;
 import ru.arkhipova.service.PlaythroughService;
 
+/**
+ * REST endpoints for playthrough lifecycle.
+ *
+ * <p>Player position updates are intentionally NOT exposed here — they are emitted on every keypress
+ * and are routed through the {@code /app/playthrough/position} STOMP endpoint instead, see
+ * {@link PlaythroughWebSocketController}.
+ */
 @RestController
 @RequestMapping("/playthrough")
 @Slf4j
@@ -41,18 +46,9 @@ public class PlaythroughController {
     public ResponseEntity<PlaythroughResponse> getActivePlaythrough(@AuthenticationPrincipal UserPrincipal principal) {
         log.debug("Get active playthrough requested for playerId={}", principal.getUserId());
         PlaythroughResponse response = playthroughService.getActivePlaythrough(principal.getUserId());
-        return ResponseEntity.ok(response);
-    }
-
-    /**
-     * Updates player position on the current floor.
-     */
-    @PutMapping("/position")
-    @Operation(summary = "Update player position", description = "Update player coordinates in current floor")
-    public ResponseEntity<PlaythroughResponse> updatePosition(
-            @AuthenticationPrincipal UserPrincipal principal, @Valid @RequestBody PositionUpdateRequest request) {
-        log.debug("Position update requested for playerId={}", principal.getUserId());
-        PlaythroughResponse response = playthroughService.updatePosition(principal.getUserId(), request);
+        if (response == null) {
+            return ResponseEntity.notFound().build();
+        }
         return ResponseEntity.ok(response);
     }
 }

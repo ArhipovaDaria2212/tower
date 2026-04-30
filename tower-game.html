@@ -511,6 +511,9 @@
             draw();
           } catch(e) { console.warn('WS parse:', e); }
         });
+        // Push an initial reveal so the area around the player's restored position
+        // is uncovered without requiring a keypress.
+        revealFogAt(worldX, worldY);
       },
       onDisconnect:     () => setStatus(false, 'RECONNECTING'),
       onWebSocketError: () => setStatus(false, 'WS ERROR'),
@@ -520,43 +523,33 @@
   }
 
   // ═══════════════════════════════════════════════════════════
-  // FOG REVEAL
+  // FOG REVEAL — published over STOMP, broadcast comes back on
+  // /topic/floors/{id}/fog (see connectWS subscription).
+  // No HTTP round-trip per move.
   // ═══════════════════════════════════════════════════════════
-  async function revealFogAt(wx, wy) {
+  function revealFogAt(wx, wy) {
     if (!currentFloor) return;
-    try {
-      await apiFetch('POST',
-              `/floors/${currentFloor.id}/fog/reveal?playerX=${wx}&playerY=${wy}&radius=${REVEAL_R}`
-      );
-      const margin = (REVEAL_R + 1) * CHUNK_BITS;
-      const fresh = await apiFetch('GET',
-              `/floors/${currentFloor.id}/fog/bounds` +
-              `?minX=${wx-margin}&minY=${wy-margin}&maxX=${wx+margin}&maxY=${wy+margin}`
-      );
-      fresh.forEach(c => {
-        const key = ck(c);
-        const had = fogChunks.has(key);
-        fogChunks.set(key, c);
-        // Paint new chunks (or repaint updated ones)
-        paintChunkAt(c, camX, camY);
-      });
-      draw();
-    } catch(e) {
-      console.warn('revealFog:', e);
-    }
+    if (!stompClient || !stompClient.connected) return;
+    stompClient.publish({
+      destination: `/app/floors/${currentFloor.id}/fog/reveal`,
+      body: JSON.stringify({ playerX: wx, playerY: wy, radius: REVEAL_R })
+    });
   }
 
   // ═══════════════════════════════════════════════════════════
-  // POSITION UPDATE
+  // POSITION UPDATE — published over STOMP. Per-keypress, so HTTP
+  // would be too costly. Server validates the floorId belongs to
+  // the active playthrough; reveal is sent as a separate STOMP
+  // frame so the broadcast goes out independently.
   // ═══════════════════════════════════════════════════════════
-  async function updatePosition(wx, wy) {
+  function updatePosition(wx, wy) {
     if (!playthrough || !currentFloor) return;
-    try {
-      await apiFetch('PUT', '/playthrough/position', {
-        playerX: wx, playerY: wy, floorId: currentFloor.id
-      });
-    } catch(_) {}
-    await revealFogAt(wx, wy);
+    if (!stompClient || !stompClient.connected) return;
+    stompClient.publish({
+      destination: '/app/playthrough/position',
+      body: JSON.stringify({ playerX: wx, playerY: wy, floorId: currentFloor.id })
+    });
+    revealFogAt(wx, wy);
   }
 
   // ═══════════════════════════════════════════════════════════
@@ -574,13 +567,12 @@
     if (e.key === 'ArrowDown')  { worldY -= MOVE_WU; moved = true; e.preventDefault(); }
 
     if (moved) {
-      worldX = Math.max(0, worldX);
-      worldY = Math.max(0, worldY);
+
       centerCamera();
       redrawFogLayer();   // repaint fog at new camera position
       draw();
       updateHUD();
-      await updatePosition(worldX, worldY);
+      updatePosition(worldX, worldY);
     }
   });
 
@@ -590,13 +582,24 @@
   async function advanceFloor() {
     try {
       const res = await apiFetch('POST', '/playthrough/active/floor/advance');
+      if (!res.floor) {
+        // paywall hit
+        console.info('advanceFloor:', res.message);
+        return;
+      }
       currentFloor = res.floor;
       fogChunks.clear();
       fogCtx.clearRect(0, 0, fogCanvas.width, fogCanvas.height);
       updateHUD();
       showFloorBadge(currentFloor.floorNumber);
+      // Reconnect & re-subscribe to the new floor's topic before pushing position.
       connectWS();
-      await updatePosition(worldX, worldY);
+      // Wait for the STOMP CONNECT to complete before publishing.
+      const start = Date.now();
+      while ((!stompClient || !stompClient.connected) && Date.now() - start < 3000) {
+        await new Promise(r => setTimeout(r, 50));
+      }
+      updatePosition(worldX, worldY);
     } catch(e) { console.warn('advanceFloor:', e); }
   }
 

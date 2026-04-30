@@ -11,7 +11,6 @@ import ru.arkhipova.model.entity.Playthrough;
 public class PlaythroughResponse {
     private UUID id;
     private UUID userId;
-    private UUID guestId;
     private UUID currentFloorId;
     private Integer currentFloorNumber;
     private Float playerX;

@@ -6,7 +6,7 @@ import java.util.UUID;
 import lombok.*;
 
 /**
- * Persistent user aggregate for registered and guest players.
+ * Persistent user aggregate for registered players.
  */
 @Getter
 @Setter
@@ -21,16 +21,13 @@ public class User {
     @GeneratedValue(strategy = GenerationType.UUID)
     private UUID id;
 
-    @Column
-    private String deviceId;
-
-    @Column(unique = true)
+    @Column(unique = true, nullable = false)
     private String email;
 
-    @Column
+    @Column(nullable = false)
     private String password;
 
-    @Column(unique = true)
+    @Column(unique = true, nullable = false)
     private String username;
 
     @Column(nullable = false)

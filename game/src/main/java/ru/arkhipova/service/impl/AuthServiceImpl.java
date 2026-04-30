@@ -46,7 +46,7 @@ public class AuthServiceImpl implements AuthService {
         user = userRepository.save(user);
         log.info("User registered successfully: userId={}", user.getId());
 
-        String token = tokenProvider.generateToken(user.getId(), "USER");
+        String token = tokenProvider.generateToken(user.getId());
 
         return AuthResponse.builder()
                 .token(token)
@@ -60,6 +60,7 @@ public class AuthServiceImpl implements AuthService {
      * Authenticates an existing user and returns a JWT access token.
      */
     @Override
+    @Transactional(readOnly = true)
     public AuthResponse login(UserLoginRequest request) {
         User user = userRepository
                 .findByEmail(request.getEmail())
@@ -70,7 +71,7 @@ public class AuthServiceImpl implements AuthService {
             throw new IllegalArgumentException("Invalid email or password");
         }
 
-        String token = tokenProvider.generateToken(user.getId(), "USER");
+        String token = tokenProvider.generateToken(user.getId());
         log.info("User logged in: userId={}", user.getId());
 
         return AuthResponse.builder()

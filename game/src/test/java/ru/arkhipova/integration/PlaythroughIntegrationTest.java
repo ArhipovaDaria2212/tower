@@ -29,9 +29,6 @@ class PlaythroughIntegrationTest {
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     @Autowired
-    private DiscoveredIconRepository discoveredIconRepository;
-
-    @Autowired
     private FogChunkRepository fogChunkRepository;
 
     @Autowired
@@ -51,7 +48,6 @@ class PlaythroughIntegrationTest {
 
     @BeforeEach
     void cleanup() {
-        discoveredIconRepository.deleteAll();
         fogChunkRepository.deleteAll();
         floorRepository.deleteAll();
         playthroughRepository.deleteAll();
@@ -67,7 +63,7 @@ class PlaythroughIntegrationTest {
                 .POST(HttpRequest.BodyPublishers.noBody())
                 .build();
         HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
-        assertEquals(403, response.statusCode());
+        assertEquals(401, response.statusCode());
     }
 
     @Test

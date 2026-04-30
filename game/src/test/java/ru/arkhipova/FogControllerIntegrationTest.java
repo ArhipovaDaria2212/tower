@@ -1,31 +1,42 @@
 package ru.arkhipova;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import java.lang.reflect.Type;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
-import java.util.concurrent.ExecutionException;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.UUID;
+import java.util.concurrent.TimeUnit;
+import org.jetbrains.annotations.NotNull;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
-import org.springframework.messaging.converter.JacksonJsonMessageConverter;
-import org.springframework.messaging.simp.stomp.StompCommand;
+import org.springframework.messaging.converter.MappingJackson2MessageConverter;
 import org.springframework.messaging.simp.stomp.StompHeaders;
 import org.springframework.messaging.simp.stomp.StompSession;
 import org.springframework.messaging.simp.stomp.StompSessionHandlerAdapter;
+import org.springframework.web.socket.WebSocketHttpHeaders;
 import org.springframework.web.socket.client.standard.StandardWebSocketClient;
 import org.springframework.web.socket.messaging.WebSocketStompClient;
+import org.springframework.web.socket.sockjs.client.SockJsClient;
+import org.springframework.web.socket.sockjs.client.WebSocketTransport;
+import ru.arkhipova.model.dto.FogChunkDto;
+import ru.arkhipova.model.request.FogRevealRequest;
 import ru.arkhipova.model.request.FogUpdateRequest;
 import ru.arkhipova.model.request.UserRegisterRequest;
+import ru.arkhipova.model.response.PlaythroughResponse;
 import ru.arkhipova.repository.EntitlementRepository;
 import ru.arkhipova.repository.FloorRepository;
 import ru.arkhipova.repository.FogChunkRepository;
@@ -37,9 +48,6 @@ import ru.arkhipova.repository.UserRepository;
 class FogControllerIntegrationTest {
 
     private final ObjectMapper objectMapper = new ObjectMapper();
-
-    @Autowired
-    private DiscoveredIconRepository discoveredIconRepository;
 
     @Autowired
     private FogChunkRepository fogChunkRepository;
@@ -61,7 +69,6 @@ class FogControllerIntegrationTest {
 
     @BeforeEach
     void cleanup() {
-        discoveredIconRepository.deleteAll();
         fogChunkRepository.deleteAll();
         floorRepository.deleteAll();
         playthroughRepository.deleteAll();
@@ -69,41 +76,93 @@ class FogControllerIntegrationTest {
         userRepository.deleteAll();
     }
 
+    /**
+     * Verifies the only HTTP fog endpoint (initial snapshot) plus the WS update path —
+     * the bounds/reveal endpoints have been moved to STOMP and are covered separately.
+     */
     @Test
-    void fogEndpointsReturnAndUpdateFogData() throws Exception {
+    void httpSnapshotAndWebsocketUpdateRoundTrip() throws Exception {
         HttpClient httpClient = HttpClient.newHttpClient();
         String token = registerAndGetToken("fog@test.com", "fog_user");
+        PlaythroughResponse playthrough =
+                objectMapper.convertValue(createPlaythrough(httpClient, token), PlaythroughResponse.class);
+        UUID floorId = playthrough.getCurrentFloorId();
+
+        HttpResponse<String> snapshot = authorizedGet(token, "/floors/" + floorId + "/fog");
+        assertEquals(200, snapshot.statusCode());
+        JsonNode body = objectMapper.readTree(snapshot.body());
+        assertTrue(body.isArray());
+        assertFalse(body.isEmpty());
+
+        FogUpdateRequest update = objectMapper.readValue(
+                "{\"chunks\":[{\"chunkX\":0,\"chunkY\":0,\"maskBase64\":\"AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA=\"}]}",
+                FogUpdateRequest.class);
+        sendFogUpdateByWebSocket(token, floorId, update);
+        Thread.sleep(200);
+
+        HttpResponse<String> after = authorizedGet(token, "/floors/" + floorId + "/fog");
+        assertEquals(200, after.statusCode());
+        JsonNode updated = objectMapper.readTree(after.body());
+        assertEquals(
+                "AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA=",
+                updated.get(0).get("maskBase64").asText());
+    }
+
+    /**
+     * A subscriber to {@code /topic/floors/{id}/fog} must receive the chunks the server saved
+     * after another client publishes to {@code /app/floors/{id}/fog/reveal}.
+     */
+    @Test
+    void revealOverWebsocketBroadcastsToSubscribers() throws Exception {
+        HttpClient httpClient = HttpClient.newHttpClient();
+        String token = registerAndGetToken("reveal@test.com", "reveal_user");
         JsonNode playthrough = createPlaythrough(httpClient, token);
         String floorId = playthrough.get("currentFloorId").asText();
 
-        HttpResponse<String> allFogResponse = authorizedGet(token, "/floors/" + floorId + "/fog");
-        assertEquals(200, allFogResponse.statusCode());
-        JsonNode allFog = objectMapper.readTree(allFogResponse.body());
-        assertTrue(allFog.isArray());
-        assertTrue(allFog.size() >= 1);
+        List<FogChunkDto> received = new ArrayList<>();
 
-        HttpResponse<String> boundsResponse =
-                authorizedGet(token, "/floors/" + floorId + "/fog/bounds?minX=0&minY=0&maxX=16&maxY=16");
-        assertEquals(200, boundsResponse.statusCode());
-        JsonNode boundsFog = objectMapper.readTree(boundsResponse.body());
-        assertTrue(boundsFog.isArray());
+        WebSocketStompClient stompClient = createSockJsClient();
 
-        HttpResponse<String> revealResponse =
-                authorizedPostNoBody(token, "/floors/" + floorId + "/fog/reveal?playerX=2&playerY=2&radius=3");
-        assertEquals(200, revealResponse.statusCode());
+        WebSocketHttpHeaders httpHeaders = new WebSocketHttpHeaders();
+        httpHeaders.add("Authorization", "Bearer " + token);
 
-        String updatePayload =
-                """
-                {"chunks":[{"chunkX":0,"chunkY":0,"maskBase64":"AQIDBA=="}]}
-                """;
-        sendFogUpdateByWebSocket(floorId, objectMapper.readValue(updatePayload, FogUpdateRequest.class));
-        Thread.sleep(200);
+        StompHeaders connectHeaders = new StompHeaders();
+        connectHeaders.add("Authorization", "Bearer " + token);
 
-        HttpResponse<String> afterUpdate = authorizedGet(token, "/floors/" + floorId + "/fog");
-        assertEquals(200, afterUpdate.statusCode());
-        JsonNode updated = objectMapper.readTree(afterUpdate.body());
-        JsonNode firstChunk = updated.get(0);
-        assertEquals("AQIDBA==", firstChunk.get("maskBase64").asText());
+        StompSession session = stompClient
+                .connectAsync(
+                        "http://localhost:" + port + "/ws",
+                        httpHeaders,
+                        connectHeaders,
+                        new StompSessionHandlerAdapter() {})
+                .get(3, TimeUnit.SECONDS);
+
+        session.subscribe("/topic/floors/" + floorId + "/fog", new StompSessionHandlerAdapter() {
+            @Override
+            public @NotNull Type getPayloadType(@NotNull StompHeaders headers) {
+                return objectMapper.getTypeFactory().constructCollectionType(List.class, FogChunkDto.class);
+            }
+
+            @Override
+            @SuppressWarnings("unchecked")
+            public void handleFrame(@NotNull StompHeaders headers, Object payload) {
+                received.addAll((List<FogChunkDto>) payload);
+            }
+        });
+
+        Thread.sleep(1000);
+
+        FogRevealRequest reveal =
+                FogRevealRequest.builder().playerX(2f).playerY(2f).radius(3f).build();
+
+        session.send("/app/floors/" + floorId + "/fog/reveal", reveal);
+
+        Thread.sleep(5000);
+
+        assertNotNull(received, "expected a fog broadcast");
+        assertTrue(!received.isEmpty());
+
+        session.disconnect();
     }
 
     private String registerAndGetToken(String email, String username) throws Exception {
@@ -145,38 +204,34 @@ class FogControllerIntegrationTest {
         return HttpClient.newHttpClient().send(request, HttpResponse.BodyHandlers.ofString());
     }
 
-    private HttpResponse<String> authorizedPostNoBody(String token, String path) throws Exception {
-        HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create("http://localhost:" + port + path))
-                .header("Authorization", "Bearer " + token)
-                .POST(HttpRequest.BodyPublishers.noBody())
-                .build();
-        return HttpClient.newHttpClient().send(request, HttpResponse.BodyHandlers.ofString());
-    }
+    private void sendFogUpdateByWebSocket(String token, UUID floorId, FogUpdateRequest request) throws Exception {
 
-    private void sendFogUpdateByWebSocket(String floorId, FogUpdateRequest request)
-            throws ExecutionException, InterruptedException {
-        WebSocketStompClient stompClient = new WebSocketStompClient(new StandardWebSocketClient());
-        stompClient.setMessageConverter(new JacksonJsonMessageConverter());
+        WebSocketStompClient stompClient = createSockJsClient();
+
+        WebSocketHttpHeaders httpHeaders = new WebSocketHttpHeaders();
+        httpHeaders.add("Authorization", "Bearer " + token);
+
+        StompHeaders connectHeaders = new StompHeaders();
+        connectHeaders.add("Authorization", "Bearer " + token);
 
         StompSession session = stompClient
-                .connectAsync("ws://localhost:" + port + "/ws", new StompSessionHandlerAdapter() {
-                    @Override
-                    public void handleFrame(StompHeaders headers, Object payload) {}
-
-                    @Override
-                    public void handleException(
-                            StompSession session,
-                            StompCommand command,
-                            StompHeaders headers,
-                            byte[] payload,
-                            Throwable exception) {
-                        throw new RuntimeException("STOMP error", exception);
-                    }
-                })
-                .get();
+                .connectAsync(
+                        "http://localhost:" + port + "/ws",
+                        httpHeaders,
+                        connectHeaders,
+                        new StompSessionHandlerAdapter() {})
+                .get(3, TimeUnit.SECONDS);
 
         session.send("/app/floors/" + floorId + "/fog", request);
+
         session.disconnect();
+    }
+
+    private WebSocketStompClient createSockJsClient() {
+        SockJsClient sockJsClient = new SockJsClient(List.of(new WebSocketTransport(new StandardWebSocketClient())));
+
+        WebSocketStompClient stompClient = new WebSocketStompClient(sockJsClient);
+        stompClient.setMessageConverter(new MappingJackson2MessageConverter());
+        return stompClient;
     }
 }

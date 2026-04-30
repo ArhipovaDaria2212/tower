@@ -17,11 +17,6 @@ public interface UserRepository extends JpaRepository<User, UUID> {
     Optional<User> findByEmail(String email);
 
     /**
-     * Finds a guest user by device identifier.
-     */
-    Optional<User> findByDeviceId(String deviceId);
-
-    /**
      * Checks whether email is already used.
      */
     boolean existsByEmail(String email);

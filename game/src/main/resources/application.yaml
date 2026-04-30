@@ -1,10 +1,12 @@
 spring:
   application:
     name: tower
+  profiles:
+    active: ${SPRING_PROFILES_ACTIVE:dev}
   datasource:
-    url: jdbc:postgresql://localhost:5432/tower
-    username: postgres
-    password: postgres
+    url: ${DB_URL}
+    username: ${DB_USERNAME}
+    password: ${DB_PASSWORD}
     driver-class-name: org.postgresql.Driver
   jpa:
     hibernate:
@@ -20,13 +22,18 @@ spring:
     locations: classpath:db/migration
 
 # JWT configuration
+# All values must be supplied via environment (see .run/TowerApplication.run.xml)
 jwt:
-  secret: ${JWT_SECRET:your-256-bit-secret-key-for-jwt-signing-minimum-32-chars}
-  expiration: 86400000  # 24 hours in milliseconds
+  secret: ${JWT_SECRET}
+  expiration: ${JWT_EXPIRATION_MS}
 
 # Server configuration
 server:
-  port: 8080
+  port: ${SERVER_PORT}
+
+# CORS configuration (comma-separated list of allowed origins)
+cors:
+  allowed-origins: ${CORS_ALLOWED_ORIGINS}
 
 # OpenAPI/Swagger
 springdoc:
@@ -37,4 +44,5 @@ springdoc:
 
 logging:
   level:
-    org.springframework.security: DEBUG
+    root: ${LOGGING_LEVEL}
+    org.springframework.security: ${LOGGING_LEVEL}

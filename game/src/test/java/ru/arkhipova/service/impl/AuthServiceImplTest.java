@@ -51,7 +51,7 @@ class AuthServiceImplTest {
         when(userRepository.existsByUsername(request.getUsername())).thenReturn(false);
         when(passwordEncoder.encode(request.getPassword())).thenReturn("encoded");
         when(userRepository.save(any(User.class))).thenReturn(saved);
-        when(jwtTokenProvider.generateToken(userId, "USER")).thenReturn("jwt-token");
+        when(jwtTokenProvider.generateToken(userId)).thenReturn("jwt-token");
 
         var result = authService.register(request);
 
@@ -73,6 +73,6 @@ class AuthServiceImplTest {
         when(passwordEncoder.matches(request.getPassword(), user.getPassword())).thenReturn(false);
 
         assertThrows(IllegalArgumentException.class, () -> authService.login(request));
-        verify(jwtTokenProvider, never()).generateToken(any(), any());
+        verify(jwtTokenProvider, never()).generateToken(any());
     }
 }

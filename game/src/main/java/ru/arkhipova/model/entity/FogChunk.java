@@ -25,11 +25,11 @@ public class FogChunk {
     @JoinColumn(name = "floor_id", nullable = false)
     private Floor floor;
 
-    @Column(name = "chunk_x", nullable = false)
-    private Integer chunkX;
+    @Column(name = "chunk_x")
+    private int chunkX;
 
-    @Column(name = "chunk_y", nullable = false)
-    private Integer chunkY;
+    @Column(name = "chunk_y")
+    private int chunkY;
 
     @Column(name = "mask")
     private byte[] mask;

@@ -23,7 +23,11 @@ public interface FogChunkRepository extends JpaRepository<FogChunk, UUID> {
     Optional<FogChunk> findByFloorIdAndChunkXAndChunkY(UUID floorId, Integer chunkX, Integer chunkY);
 
     /**
-     * Finds multiple chunks for one X coordinate and a list of Y coordinates.
+     * Returns chunks of a floor whose coordinates lie within given inclusive ranges.
+     *
+     * <p>Used to fetch all chunks intersecting a viewport in a single query, instead of issuing
+     * one lookup per (chunkX, chunkY) pair.
      */
-    List<FogChunk> findByFloorIdAndChunkXAndChunkYIn(UUID floorId, Integer chunkX, List<Integer> chunkYs);
+    List<FogChunk> findByFloorIdAndChunkXBetweenAndChunkYBetween(
+            UUID floorId, Integer minChunkX, Integer maxChunkX, Integer minChunkY, Integer maxChunkY);
 }
