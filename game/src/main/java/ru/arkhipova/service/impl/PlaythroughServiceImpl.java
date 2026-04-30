@@ -6,12 +6,10 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import ru.arkhipova.exception.ForbiddenException;
-import ru.arkhipova.model.entity.Entitlement;
 import ru.arkhipova.model.entity.Floor;
 import ru.arkhipova.model.entity.Playthrough;
 import ru.arkhipova.model.request.PositionUpdateRequest;
 import ru.arkhipova.model.response.PlaythroughResponse;
-import ru.arkhipova.repository.EntitlementRepository;
 import ru.arkhipova.repository.PlaythroughRepository;
 import ru.arkhipova.repository.UserRepository;
 import ru.arkhipova.service.FloorService;
@@ -24,7 +22,6 @@ public class PlaythroughServiceImpl implements PlaythroughService {
 
     private final PlaythroughRepository playthroughRepository;
     private final UserRepository userRepository;
-    private final EntitlementRepository entitlementRepository;
     private final FloorService floorService;
 
     /**
@@ -60,11 +57,6 @@ public class PlaythroughServiceImpl implements PlaythroughService {
         playthrough.setCurrentFloor(firstFloor);
         playthrough = playthroughRepository.save(playthrough);
 
-        if (entitlementRepository.findByUserId(playerId).isEmpty()) {
-            Entitlement entitlement =
-                    Entitlement.builder().user(user).maxUnlockedFloor(1).build();
-            entitlementRepository.save(entitlement);
-        }
         log.info("Active playthrough created for playerId={}, playthroughId={}", playerId, playthrough.getId());
 
         return toResponse(playthrough);
@@ -99,7 +91,7 @@ public class PlaythroughServiceImpl implements PlaythroughService {
      */
     @Override
     @Transactional
-    public PlaythroughResponse updatePosition(UUID playerId, PositionUpdateRequest request) {
+    public void updatePosition(UUID playerId, PositionUpdateRequest request) {
         validateFinite(request.getPlayerX(), "playerX");
         validateFinite(request.getPlayerY(), "playerY");
 
@@ -124,7 +116,7 @@ public class PlaythroughServiceImpl implements PlaythroughService {
         playthrough = playthroughRepository.save(playthrough);
         log.debug("Position updated for playerId={}, x={}, y={}", playerId, request.getPlayerX(), request.getPlayerY());
 
-        return toResponse(playthrough);
+        toResponse(playthrough);
     }
 
     private static void validateFinite(Float value, String field) {

@@ -11,12 +11,10 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import ru.arkhipova.exception.ForbiddenException;
-import ru.arkhipova.model.entity.Entitlement;
 import ru.arkhipova.model.entity.Floor;
 import ru.arkhipova.model.entity.Playthrough;
 import ru.arkhipova.model.entity.User;
 import ru.arkhipova.model.request.PositionUpdateRequest;
-import ru.arkhipova.repository.EntitlementRepository;
 import ru.arkhipova.repository.PlaythroughRepository;
 import ru.arkhipova.repository.UserRepository;
 import ru.arkhipova.service.FloorService;
@@ -29,9 +27,6 @@ class PlaythroughServiceImplTest {
 
     @Mock
     private UserRepository userRepository;
-
-    @Mock
-    private EntitlementRepository entitlementRepository;
 
     @Mock
     private FloorService floorService;
@@ -54,7 +49,6 @@ class PlaythroughServiceImplTest {
         var response = playthroughService.createPlaythrough(playerId);
 
         assertEquals(existing.getId(), response.getId());
-        verify(entitlementRepository, never()).save(any(Entitlement.class));
     }
 
     @Test

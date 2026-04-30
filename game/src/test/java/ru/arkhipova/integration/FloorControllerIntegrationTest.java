@@ -17,7 +17,6 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
 import ru.arkhipova.configuration.TestcontainersConfiguration;
 import ru.arkhipova.model.request.UserRegisterRequest;
-import ru.arkhipova.repository.EntitlementRepository;
 import ru.arkhipova.repository.FloorRepository;
 import ru.arkhipova.repository.FogChunkRepository;
 import ru.arkhipova.repository.PlaythroughRepository;
@@ -39,9 +38,6 @@ class FloorControllerIntegrationTest {
     private PlaythroughRepository playthroughRepository;
 
     @Autowired
-    private EntitlementRepository entitlementRepository;
-
-    @Autowired
     private UserRepository userRepository;
 
     @Value("${local.server.port}")
@@ -52,7 +48,6 @@ class FloorControllerIntegrationTest {
         fogChunkRepository.deleteAll();
         floorRepository.deleteAll();
         playthroughRepository.deleteAll();
-        entitlementRepository.deleteAll();
         userRepository.deleteAll();
     }
 
@@ -66,13 +61,6 @@ class FloorControllerIntegrationTest {
         assertEquals(200, currentFloorResponse.statusCode());
         JsonNode currentFloor = objectMapper.readTree(currentFloorResponse.body());
         assertEquals(1, currentFloor.get("floorNumber").asInt());
-
-        HttpResponse<String> advanceResponse =
-                authorizedPostNoBody(httpClient, token, "/playthrough/active/floor/advance");
-        assertEquals(200, advanceResponse.statusCode());
-        JsonNode advanceBody = objectMapper.readTree(advanceResponse.body());
-        assertEquals("Floor 2 requires purchase", advanceBody.get("message").asText());
-        assertEquals("null", advanceBody.get("floor").asText());
     }
 
     private String registerAndGetToken(String email, String username) throws Exception {

@@ -17,7 +17,6 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
 import ru.arkhipova.configuration.TestcontainersConfiguration;
 import ru.arkhipova.model.request.UserRegisterRequest;
-import ru.arkhipova.repository.EntitlementRepository;
 import ru.arkhipova.repository.FloorRepository;
 import ru.arkhipova.repository.FogChunkRepository;
 import ru.arkhipova.repository.PlaythroughRepository;
@@ -39,9 +38,6 @@ class PlaythroughIntegrationTest {
     private PlaythroughRepository playthroughRepository;
 
     @Autowired
-    private EntitlementRepository entitlementRepository;
-
-    @Autowired
     private UserRepository userRepository;
 
     @Value("${local.server.port}")
@@ -52,7 +48,6 @@ class PlaythroughIntegrationTest {
         fogChunkRepository.deleteAll();
         floorRepository.deleteAll();
         playthroughRepository.deleteAll();
-        entitlementRepository.deleteAll();
         userRepository.deleteAll();
     }
 

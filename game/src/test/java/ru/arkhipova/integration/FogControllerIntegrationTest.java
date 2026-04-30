@@ -7,16 +7,13 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import java.lang.reflect.Type;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
-import org.jetbrains.annotations.NotNull;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -33,12 +30,9 @@ import org.springframework.web.socket.messaging.WebSocketStompClient;
 import org.springframework.web.socket.sockjs.client.SockJsClient;
 import org.springframework.web.socket.sockjs.client.WebSocketTransport;
 import ru.arkhipova.configuration.TestcontainersConfiguration;
-import ru.arkhipova.model.dto.FogChunkDto;
-import ru.arkhipova.model.request.FogRevealRequest;
 import ru.arkhipova.model.request.FogUpdateRequest;
 import ru.arkhipova.model.request.UserRegisterRequest;
 import ru.arkhipova.model.response.PlaythroughResponse;
-import ru.arkhipova.repository.EntitlementRepository;
 import ru.arkhipova.repository.FloorRepository;
 import ru.arkhipova.repository.FogChunkRepository;
 import ru.arkhipova.repository.PlaythroughRepository;
@@ -60,9 +54,6 @@ class FogControllerIntegrationTest {
     private PlaythroughRepository playthroughRepository;
 
     @Autowired
-    private EntitlementRepository entitlementRepository;
-
-    @Autowired
     private UserRepository userRepository;
 
     @Value("${local.server.port}")
@@ -73,7 +64,6 @@ class FogControllerIntegrationTest {
         fogChunkRepository.deleteAll();
         floorRepository.deleteAll();
         playthroughRepository.deleteAll();
-        entitlementRepository.deleteAll();
         userRepository.deleteAll();
     }
 

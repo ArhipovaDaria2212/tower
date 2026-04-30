@@ -12,7 +12,6 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import ru.arkhipova.model.entity.Floor;
 import ru.arkhipova.model.entity.Playthrough;
-import ru.arkhipova.repository.EntitlementRepository;
 import ru.arkhipova.repository.FloorRepository;
 import ru.arkhipova.repository.PlaythroughRepository;
 import ru.arkhipova.service.FogService;
@@ -25,9 +24,6 @@ class FloorServiceImplTest {
 
     @Mock
     private PlaythroughRepository playthroughRepository;
-
-    @Mock
-    private EntitlementRepository entitlementRepository;
 
     @Mock
     private FogService fogService;
@@ -45,14 +41,14 @@ class FloorServiceImplTest {
                 .currentFloor(current)
                 .build();
 
+        when(floorRepository.save(any(Floor.class))).thenReturn(current);
         when(playthroughRepository.findByUserIdAndStatus(playerId, Playthrough.PlaythroughStatus.ACTIVE))
                 .thenReturn(Optional.of(playthrough));
-        when(entitlementRepository.findByUserId(playerId)).thenReturn(Optional.empty());
 
         var response = floorService.advanceFloor(playerId);
 
-        assertNull(response.getFloor());
-        assertTrue(response.getMessage().contains("requires purchase"));
+        assertNotNull(response);
+        assertNotNull(response.getFloor());
     }
 
     @Test

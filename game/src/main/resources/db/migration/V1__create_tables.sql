@@ -50,14 +50,3 @@ CREATE TABLE fog_chunks (
 );
 
 CREATE INDEX idx_fog_chunk_floor ON fog_chunks(floor_id);
-
--- Entitlements table (for paywall)
-CREATE TABLE entitlements (
-    id UUID PRIMARY KEY,
-    user_id UUID NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
-    max_unlocked_floor INTEGER NOT NULL DEFAULT 1,
-    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP WITH TIME ZONE
-);
-
-CREATE INDEX idx_entitlements_user ON entitlements(user_id);

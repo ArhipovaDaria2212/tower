@@ -9,11 +9,15 @@ import ru.arkhipova.model.request.FogUpdateRequest;
 
 public interface FogService {
 
+    /**
+     * Creates an initial fully exposed fog layer for the new floor.
+     */
     void initializeFog(Floor floor);
 
+    /**
+     * Returns all fog chunks for the floor (read-only).
+     */
     List<FogChunkDto> getFogChunks(UUID floorId, UUID playerId);
-
-    List<FogChunkDto> getFogChunksInBounds(UUID floorId, UUID playerId, float minX, float minY, float maxX, float maxY);
 
     /**
      * Persists fog mask updates and returns the chunks that were saved (for broadcasting).

@@ -1,8 +1,8 @@
 package ru.arkhipova.service.impl;
 
-import static ru.arkhipova.service.FogConstants.CELLS_PER_CHUNK_AXIS;
-import static ru.arkhipova.service.FogConstants.CHUNK_SIZE;
-import static ru.arkhipova.service.FogConstants.MASK_SIZE_BYTES;
+import static ru.arkhipova.utils.FogConstants.CELLS_PER_CHUNK_AXIS;
+import static ru.arkhipova.utils.FogConstants.CHUNK_SIZE;
+import static ru.arkhipova.utils.FogConstants.MASK_SIZE_BYTES;
 
 import java.util.*;
 import java.util.stream.Collectors;
@@ -35,7 +35,7 @@ public class FogServiceImpl implements FogService {
     @Transactional
     public void initializeFog(Floor floor) {
         byte[] initialMask = new byte[MASK_SIZE_BYTES];
-        Arrays.fill(initialMask, (byte) 0xFF);
+        Arrays.fill(initialMask, (byte) 0x00);
 
         FogChunk chunk = FogChunk.builder().floor(floor).mask(initialMask).build();
 
@@ -51,27 +51,6 @@ public class FogServiceImpl implements FogService {
     public List<FogChunkDto> getFogChunks(UUID floorId, UUID playerId) {
         assertFloorOwnership(floorId, playerId);
         List<FogChunk> chunks = fogChunkRepository.findByFloorId(floorId);
-        return chunks.stream().map(this::toDto).collect(Collectors.toList());
-    }
-
-    /**
-     * Returns fog chunks that intersect the requested world bounds. One DB query, not N×M.
-     */
-    @Override
-    @Transactional(readOnly = true)
-    public List<FogChunkDto> getFogChunksInBounds(
-            UUID floorId, UUID playerId, float minX, float minY, float maxX, float maxY) {
-        assertFloorOwnership(floorId, playerId);
-
-        int minChunkX = getChunk(minX);
-        int maxChunkX = getChunk(maxX);
-        int minChunkY = getChunk(minY);
-        int maxChunkY = getChunk(maxY);
-
-        List<FogChunk> chunks = fogChunkRepository.findByFloorIdAndChunkXBetweenAndChunkYBetween(
-                floorId, minChunkX, maxChunkX, minChunkY, maxChunkY);
-
-        log.debug("Fog bounds query: floorId={}, chunksReturned={}", floorId, chunks.size());
         return chunks.stream().map(this::toDto).collect(Collectors.toList());
     }
 
@@ -157,7 +136,7 @@ public class FogServiceImpl implements FogService {
                             .mask(new byte[MASK_SIZE_BYTES])
                             .build();
                 }
-                revealCellsInChunk(chunk, minX, minY, maxX, maxY, cx, cy);
+                revealCellsInChunk(chunk, minX, minY, maxX, maxY);
                 toSave.add(chunk);
             }
         }
@@ -194,17 +173,11 @@ public class FogServiceImpl implements FogService {
     }
 
     private void revealCellsInChunk(
-            FogChunk chunk,
-            float worldMinX,
-            float worldMinY,
-            float worldMaxX,
-            float worldMaxY,
-            int chunkX,
-            int chunkY) {
+            FogChunk chunk, float worldMinX, float worldMinY, float worldMaxX, float worldMaxY) {
         byte[] mask = chunk.getMask();
 
-        float chunkWorldMinX = chunkX * CHUNK_SIZE;
-        float chunkWorldMinY = chunkY * CHUNK_SIZE;
+        float chunkWorldMinX = chunk.getChunkX() * CHUNK_SIZE;
+        float chunkWorldMinY = chunk.getChunkY() * CHUNK_SIZE;
 
         for (int localX = 0; localX < CELLS_PER_CHUNK_AXIS; localX++) {
             for (int localY = 0; localY < CELLS_PER_CHUNK_AXIS; localY++) {
