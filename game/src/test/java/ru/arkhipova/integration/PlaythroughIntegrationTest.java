@@ -1,4 +1,4 @@
-package ru.arkhipova;
+package ru.arkhipova.integration;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -15,6 +15,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
+import ru.arkhipova.configuration.TestcontainersConfiguration;
 import ru.arkhipova.model.request.UserRegisterRequest;
 import ru.arkhipova.repository.EntitlementRepository;
 import ru.arkhipova.repository.FloorRepository;

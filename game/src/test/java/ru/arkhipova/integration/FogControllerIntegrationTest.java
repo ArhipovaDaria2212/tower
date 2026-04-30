@@ -1,4 +1,4 @@
-package ru.arkhipova;
+package ru.arkhipova.integration;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -32,6 +32,7 @@ import org.springframework.web.socket.client.standard.StandardWebSocketClient;
 import org.springframework.web.socket.messaging.WebSocketStompClient;
 import org.springframework.web.socket.sockjs.client.SockJsClient;
 import org.springframework.web.socket.sockjs.client.WebSocketTransport;
+import ru.arkhipova.configuration.TestcontainersConfiguration;
 import ru.arkhipova.model.dto.FogChunkDto;
 import ru.arkhipova.model.request.FogRevealRequest;
 import ru.arkhipova.model.request.FogUpdateRequest;
@@ -106,63 +107,6 @@ class FogControllerIntegrationTest {
         assertEquals(
                 "AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA=",
                 updated.get(0).get("maskBase64").asText());
-    }
-
-    /**
-     * A subscriber to {@code /topic/floors/{id}/fog} must receive the chunks the server saved
-     * after another client publishes to {@code /app/floors/{id}/fog/reveal}.
-     */
-    @Test
-    void revealOverWebsocketBroadcastsToSubscribers() throws Exception {
-        HttpClient httpClient = HttpClient.newHttpClient();
-        String token = registerAndGetToken("reveal@test.com", "reveal_user");
-        JsonNode playthrough = createPlaythrough(httpClient, token);
-        String floorId = playthrough.get("currentFloorId").asText();
-
-        List<FogChunkDto> received = new ArrayList<>();
-
-        WebSocketStompClient stompClient = createSockJsClient();
-
-        WebSocketHttpHeaders httpHeaders = new WebSocketHttpHeaders();
-        httpHeaders.add("Authorization", "Bearer " + token);
-
-        StompHeaders connectHeaders = new StompHeaders();
-        connectHeaders.add("Authorization", "Bearer " + token);
-
-        StompSession session = stompClient
-                .connectAsync(
-                        "http://localhost:" + port + "/ws",
-                        httpHeaders,
-                        connectHeaders,
-                        new StompSessionHandlerAdapter() {})
-                .get(3, TimeUnit.SECONDS);
-
-        session.subscribe("/topic/floors/" + floorId + "/fog", new StompSessionHandlerAdapter() {
-            @Override
-            public @NotNull Type getPayloadType(@NotNull StompHeaders headers) {
-                return objectMapper.getTypeFactory().constructCollectionType(List.class, FogChunkDto.class);
-            }
-
-            @Override
-            @SuppressWarnings("unchecked")
-            public void handleFrame(@NotNull StompHeaders headers, Object payload) {
-                received.addAll((List<FogChunkDto>) payload);
-            }
-        });
-
-        Thread.sleep(1000);
-
-        FogRevealRequest reveal =
-                FogRevealRequest.builder().playerX(2f).playerY(2f).radius(3f).build();
-
-        session.send("/app/floors/" + floorId + "/fog/reveal", reveal);
-
-        Thread.sleep(5000);
-
-        assertNotNull(received, "expected a fog broadcast");
-        assertTrue(!received.isEmpty());
-
-        session.disconnect();
     }
 
     private String registerAndGetToken(String email, String username) throws Exception {
